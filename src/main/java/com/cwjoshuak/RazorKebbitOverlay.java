@@ -28,7 +28,7 @@ class RazorKebbitOverlay extends Overlay {
 
 	@Override
 	public Dimension render(Graphics2D graphics) {
-		if (!plugin.isInRazorKebbitArea()) {
+		if (plugin.getHuntingTrail() == null) {
 			return null;
 		}
 		int finishId = plugin.getFinishId();
@@ -47,11 +47,13 @@ class RazorKebbitOverlay extends Overlay {
 
 		// Draw finish tunnels
 		if (config.isBushesShown() && finishId > 0) {
-			WorldPoint finishLoc = plugin.getEndLocations().get(finishId - 1);
-			TileObject object = plugin.getBushes().get(finishLoc);
-			drawObjectLocation(graphics, object, config.getBushesColor());
+			WorldPoint finishLoc = plugin.getHuntingTrail().getEndLocations().get(finishId - 1);
+			if (finishLoc != null)
+			{
+				TileObject object = plugin.getBushes().get(finishLoc);
+				drawObjectLocation(graphics, object, config.getBushesColor());
+			}
 		}
-
 		return null;
 	}
 

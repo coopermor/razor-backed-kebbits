@@ -91,4 +91,15 @@ public interface RazorKebbitConfig extends Config {
 	default boolean dynamicMenuEntrySwap() {
 		return true;
 	}
+
+	@ConfigItem(
+		position = 8,
+		keyName = "deprioritizeBurrowWithoutPursuit",
+		name = "Require ring of pursuit",
+		description = "Deprioritize burrow Inspect when a ring of pursuit is not equipped"
+	)
+	default boolean deprioritizeBurrowWithoutPursuit()
+	{
+		return false;
+	}
 }

@@ -1,7 +1,6 @@
 package com.cwjoshuak;
 
-import com.google.common.collect.ImmutableList;
-import com.google.common.collect.ImmutableSet;
+
 import com.google.common.collect.Lists;
 import com.google.inject.Provides;
 
@@ -12,6 +11,8 @@ import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.*;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.events.*;
+import net.runelite.api.gameval.InventoryID;
+import net.runelite.api.gameval.ItemID;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.plugins.Plugin;
@@ -22,13 +23,12 @@ import net.runelite.client.callback.ClientThread;
 import org.apache.commons.lang3.ArrayUtils;
 
 import java.util.*;
-import java.util.stream.Collectors;
 
 @Slf4j
 @PluginDescriptor(
-	name = "Razor Kebbit Tracking",
-	description = "Track razor-backed kebbits like you would Herbiboar.",
-	tags = {"razor", "kebbit", "backed", "razorback", "razorbacked", "razor-backed", "kebbits", "hunter", "rumour"}
+	name = "Kebbit Tracking",
+	description = "Track kebbits like you would Herbiboar.",
+	tags = {"razor", "kebbit", "backed", "razorback", "razorbacked", "razor-backed", "kebbits", "hunter", "rumour", "feldip", "weasel"}
 )
 @Getter
 public class RazorKebbitPlugin extends Plugin {
@@ -47,27 +47,7 @@ public class RazorKebbitPlugin extends Plugin {
 	@Inject
 	private RazorKebbitOverlay overlay;
 
-
-	private static final List<WorldPoint> END_LOCATIONS = ImmutableList.of(
-		new WorldPoint(2358, 3620, 0),
-		new WorldPoint(2351, 3619, 0),
-		new WorldPoint(2362, 3615, 0),
-		new WorldPoint(2354, 3609, 0),
-		new WorldPoint(2357, 3607, 0),
-		new WorldPoint(2349, 3604, 0),
-		new WorldPoint(2360, 3602, 0),
-		new WorldPoint(2355, 3601, 0)
-	);
-
-	private static final Set<Integer> START_OBJECT_IDS = ImmutableSet.of(
-			ObjectID.BURROW,
-			ObjectID.BURROW_19580,
-			ObjectID.BURROW_19579
-	);
-
-	private static final Integer RAZOR_KEBBIT_REGION = 9272;
-	private static final Integer VARBIT_FINISH = 2994;
-	List<Integer> varbitIds = Arrays.stream(RBKebbitSearchSpot.values()).map(s -> s.varbit).collect(Collectors.toList());
+	private HuntingTrail huntingTrail;
 	@Getter
 	private final List<WorldPoint> currentPath = Lists.newArrayList();
 
@@ -79,12 +59,7 @@ public class RazorKebbitPlugin extends Plugin {
 
 	@Getter
 	private final Map<WorldPoint, TileObject> bushes = new HashMap<>();
-
-	private boolean inRazorKebbitArea;
 	private int finishId;
-	public static final String[] TRAIL_MENU_ENTRY_TARGETS = new String[]{
-		"Plant", "Bush", "Burrow"
-	};
 
 	@Override
 	protected void startUp() throws Exception {
@@ -93,8 +68,7 @@ public class RazorKebbitPlugin extends Plugin {
 		if (client.getGameState() == GameState.LOGGED_IN) {
 			clientThread.invokeLater(() ->
 			{
-				inRazorKebbitArea = checkArea();
-				updateTrailData(null);
+				huntingTrail = checkArea();
 			});
 		}
 	}
@@ -104,7 +78,7 @@ public class RazorKebbitPlugin extends Plugin {
 		overlayManager.remove(overlay);
 		resetTrailData();
 		clearCache();
-		inRazorKebbitArea = false;
+		huntingTrail = null;
 	}
 
 	@Subscribe
@@ -113,10 +87,11 @@ public class RazorKebbitPlugin extends Plugin {
 			case HOPPING:
 			case LOGGING_IN:
 				resetTrailData();
+				huntingTrail = null;
 				break;
 			case LOADING:
 				clearCache();
-				inRazorKebbitArea = checkArea();
+				huntingTrail =  checkArea();
 				break;
 			default:
 				break;
@@ -125,7 +100,6 @@ public class RazorKebbitPlugin extends Plugin {
 
 	@Subscribe
 	public void onVarbitChanged(VarbitChanged event) {
-
 		updateTrailData(event);
 	}
 
@@ -152,14 +126,21 @@ public class RazorKebbitPlugin extends Plugin {
 		onTileObject(event.getGroundObject(), null);
 	}
 
-	private boolean checkArea() {
+	private HuntingTrail checkArea() {
 		final int[] mapRegions = client.getMapRegions();
-		return ArrayUtils.contains(mapRegions, RAZOR_KEBBIT_REGION);
+		for (HuntingTrail trail : HuntingTrail.values())
+		{
+			if (ArrayUtils.contains(mapRegions, trail.getRegion()))
+			{
+				return trail;
+			}
+		}
+
+		return null;
 	}
 
 	// Store relevant GameObjects
 	private void onTileObject(TileObject oldObject, TileObject newObject) {
-
 		if (oldObject != null) {
 			WorldPoint oldLocation = oldObject.getWorldLocation();
 			burrows.remove(oldLocation);
@@ -170,45 +151,66 @@ public class RazorKebbitPlugin extends Plugin {
 		if (newObject == null) {
 			return;
 		}
-		if (START_OBJECT_IDS.contains(newObject.getId())) {
+		if (huntingTrail == null) {
+			return;
+		}
+
+		if (huntingTrail.getStartObjectIds().contains(newObject.getId())) {
 			burrows.put(newObject.getWorldLocation(), newObject);
 			return;
 		}
-		if (RBKebbitSearchSpot.isSearchSpot(newObject.getWorldLocation())) {
+		if (huntingTrail.isSearchSpot(newObject.getWorldLocation())) {
 			trailObjects.put(newObject.getWorldLocation(), newObject);
 			return;
 		}
-		if (END_LOCATIONS.contains(newObject.getWorldLocation())) {
+		if (huntingTrail.getEndLocations().contains(newObject.getWorldLocation())) {
 			bushes.put(newObject.getWorldLocation(), newObject);
 			return;
 		}
 	}
 
 
-	private void updateTrailData(VarbitChanged event) {
-		if (!inRazorKebbitArea || event == null) {
+	private void updateTrailData(VarbitChanged event)
+	{
+		if (huntingTrail == null || event == null)
+		{
 			return;
 		}
-		finishId = client.getVarbitValue(VARBIT_FINISH);
-		if (varbitIds.contains(event.getVarbitId())) {
-			WorldPoint wp = RBKebbitSearchSpot.worldPoint(event.getVarbitId());
-			if (event.getValue() == 1 || event.getValue() == 2 || event.getValue() == 3) {
-				if (currentPath.contains(wp)) {
-					currentPath.remove(wp);
-				} else {
-					currentPath.add(wp);
-				}
-			} else {
-				currentPath.remove(wp);
+
+		finishId = client.getVarbitValue(huntingTrail.getFinishVarbit());
+
+		if (huntingTrail.hasSearchVarbit(event.getVarbitId()))
+		{
+			WorldPoint wp = huntingTrail.getSearchSpot(event.getVarbitId(), event.getValue());
+
+			if (wp == null) {
+				return;
 			}
-		} else if (event.getVarbitId() == VARBIT_FINISH && event.getValue() == 0) {
+
+			switch (event.getValue()) {
+				case 1:
+				case 2:
+					if (!currentPath.contains(wp))
+					{
+						currentPath.add(wp);
+					}
+					break;
+				case 3:
+				case 4:
+					currentPath.remove(wp);
+					break;
+			}
+		}
+		else if (event.getVarbitId() == huntingTrail.getFinishVarbit()
+			&& event.getValue() == 0)
+		{
 			resetTrailData();
 		}
 	}
 
 	@Subscribe
 	public void onMenuEntryAdded(MenuEntryAdded event) {
-		if (!isInRazorKebbitArea()) {
+		if (huntingTrail == null) {
 			return;
 		}
 
@@ -220,19 +222,26 @@ public class RazorKebbitPlugin extends Plugin {
 
 	private void swapTrailMenuEntries(MenuEntryAdded event) {
 		String target = event.getTarget();
-		for (String menuTarget : TRAIL_MENU_ENTRY_TARGETS) {
+		for (String menuTarget : huntingTrail.getMenuTargets()) {
 			if (target.contains(menuTarget)) {
 				MenuEntry entry = event.getMenuEntry();
 				WorldPoint entryTargetPoint = WorldPoint.fromScene(client, entry.getParam0(), entry.getParam1(), client.getPlane());
 
 				if (finishId == 0) {
-					if (currentPath.isEmpty() && burrows.get(entryTargetPoint) == null) {
-						entry.setDeprioritized(true);
-					} else if (!currentPath.isEmpty() && !entryTargetPoint.equals(currentPath.get(currentPath.size() - 1))) {
+					if (currentPath.isEmpty()) {
+						if (burrows.get(entryTargetPoint) == null)
+						{
+							entry.setDeprioritized(true);
+						}
+						else if (config.deprioritizeBurrowWithoutPursuit() && entry.getOption().equals("Inspect") && !isWearingRingOfPursuit()) {
+							entry.setDeprioritized(true);
+						}
+					} else if (!entryTargetPoint.equals(currentPath.get(currentPath.size() - 1))) {
 						entry.setDeprioritized(true);
 					}
 				} else {
-					if (!END_LOCATIONS.contains(entryTargetPoint)) {
+					WorldPoint finishLocation = huntingTrail.getEndLocations().get(finishId - 1);
+					if (!entryTargetPoint.equals(finishLocation)) {
 						entry.setDeprioritized(true);
 					} else {
 						if (!entry.getOption().equals("Attack")) {
@@ -263,7 +272,18 @@ public class RazorKebbitPlugin extends Plugin {
 		bushes.clear();
 	}
 
-	List<WorldPoint> getEndLocations() {
-		return END_LOCATIONS;
+	private boolean isWearingRingOfPursuit()
+	{
+		ItemContainer equipment = client.getItemContainer(InventoryID.WORN);
+		if (equipment == null) {
+			return false;
+		}
+
+		final Item ring = equipment.getItem(EquipmentInventorySlot.RING.getSlotIdx());
+		if (ring == null) {
+			return false;
+		}
+
+		return ring.getId() == ItemID.RING_OF_PURSUIT;
 	}
 }
